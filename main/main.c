@@ -10,39 +10,37 @@
 #include "led_strip.h"
 #include "ssd1306.h"
 
-static const char *TAG = "BAO_CHAY";
+static const char *TAG = "HE_THONG_BAO_CHAY";
 
 /* --- KHAI BÁO CHÂN PHẦN CỨNG --- */
 #define PIN_FLAME_SENSOR GPIO_NUM_2
-#define PIN_MQ2_SENSOR   GPIO_NUM_3
-#define PIN_BUZZER       GPIO_NUM_4   // Chân còi hú (kích qua transistor)
+#define PIN_BUZZER       GPIO_NUM_3  
 #define PIN_LED_STRIP    GPIO_NUM_5
 #define SO_BONG_LED      8
-
-/* OLED SSD1306 (I2C) - đổi cho đúng board của bạn */
+  
+/* OLED SSD1306 (I2C) */
 #define PIN_OLED_SDA     GPIO_NUM_6
 #define PIN_OLED_SCL     GPIO_NUM_7
 #define OLED_ADDR        0x3C
 
-/* MQ-9 (ADC) */
-#define GPIO_ADC_MQ9     ADC_CHANNEL_0
+/* CẢM BIẾN MQ (ADC) - Gộp chung Gas và CO */
+#define GPIO_ADC_MQ      ADC_CHANNEL_0
 #define V_REF            3.3f
 #define ADC_LEVEL        4095.0f      // 2^12 - 1
-#define MQ9_RO           1.0f         // Ro trong không khí sạch (kΩ) -> nên hiệu chuẩn lại
-#define CO_NGUONG_BAO    50.0f        // >= ngưỡng này thì báo động (ppm)
-#define CO_NGUONG_TAT    40.0f        // <= ngưỡng này thì hết báo động (chống nhấp nháy)
+#define MQ_RO            1.0f         // Ro trong không khí sạch (kΩ)
+#define KHI_NGUONG_BAO   5.0f        // >= ngưỡng này thì báo động (ppm)
+#define KHI_NGUONG_TAT   4.0f        // <= ngưỡng này thì hết báo động (chống nhấp nháy)
 
 /* --- KIỂU DỮ LIỆU --- */
 typedef enum {
     eCamBienLua,
-    eCamBienGas,
-    eCamBienCO
+    eCamBienMQ9 // Thay thế cho eCamBienGas và eCamBienCO
 } NguonCamBien_t;
 
 typedef struct {
     NguonCamBien_t eNguon;
     uint8_t bNguyHiem;   // 1 = Nguy hiểm, 0 = Bình thường
-    float   fGiaTri;     // Dùng cho CO (ppm)
+    float   fGiaTri;     // Nồng độ PPM
 } ThongTinCamBien_t;
 
 /* --- BIẾN TOÀN CỤC --- */
@@ -78,18 +76,18 @@ static void KhoiTaoOLED(void)
     ssd1306_config_t cfg = SSD1306_I2C_CONFIG_DEFAULT(bus);
     cfg.addr = OLED_ADDR;
     if (ssd1306_new(&cfg, &oled) != ESP_OK) {
-        oled = NULL;   // Không có OLED thì hệ thống vẫn chạy bình thường
+        oled = NULL;
         ESP_LOGE(TAG, "Khong tim thay OLED SSD1306 @0x%02X", OLED_ADDR);
     }
 }
 
-static void CapNhatManHinhOLED(uint8_t co_lua, uint8_t co_gas, uint8_t co_co, float ppm_co)
+static void CapNhatManHinhOLED(uint8_t co_lua, uint8_t co_khi, float ppm)
 {
     static int last_alarm = -1;
-    uint8_t alarm = co_lua || co_gas || co_co;
+    uint8_t alarm = co_lua || co_khi;
 
-    printf("[OLED] %s | Lua:%d Gas:%d CO:%d (%.1f ppm)\n",
-           alarm ? "NGUY HIEM" : "AN TOAN", co_lua, co_gas, co_co, ppm_co);
+    printf("[OLED] %s | Lua: %d | Khi Doc: %d (%.1f ppm)\n",
+           alarm ? "NGUY HIEM" : "AN TOAN", co_lua, co_khi, ppm);
 
     if (!oled) return;
 
@@ -99,13 +97,12 @@ static void CapNhatManHinhOLED(uint8_t co_lua, uint8_t co_gas, uint8_t co_co, fl
 
     ssd1306_draw_string(oled, 0, 14, alarm ? "NGUY HIEM!" : "AN TOAN", 2, SSD1306_COLOR_WHITE);
 
-    ssd1306_printf(oled, 0, 36, 1, SSD1306_COLOR_WHITE, "LUA : %s", co_lua ? "PHAT HIEN" : "Khong");
-    ssd1306_printf(oled, 0, 46, 1, SSD1306_COLOR_WHITE, "GAS : %s", co_gas ? "PHAT HIEN" : "Khong");
-    ssd1306_printf(oled, 0, 56, 1, SSD1306_COLOR_WHITE, "CO  : %.1f ppm%s", ppm_co, co_co ? " !" : "");
+    ssd1306_printf(oled, 0, 36, 1, SSD1306_COLOR_WHITE, "LUA     : %s", co_lua ? "PHAT HIEN" : "Khong");
+    ssd1306_printf(oled, 0, 50, 1, SSD1306_COLOR_WHITE, "KHI DOC : %.1f ppm%s", ppm, co_khi ? " !" : "");
 
     ssd1306_flush(oled);
 
-    if (alarm != last_alarm) {          // Đảo màu màn hình khi báo động
+    if (alarm != last_alarm) {          
         ssd1306_set_invert(oled, alarm);
         last_alarm = alarm;
     }
@@ -130,7 +127,7 @@ static void KhaiBaoLedStrip(void)
 
 static void DieuKhienLedStrip_That(int che_do)
 {
-    if (che_do == 0) {                       // Tắt
+    if (che_do == 0) {
         led_strip_clear(led_strip);
         return;
     }
@@ -143,7 +140,7 @@ static void DieuKhienLedStrip_That(int che_do)
 }
 
 /* ========================================================================= *
- * MQ-9 (ADC)
+ * CẢM BIẾN KHÍ (ADC)
  * ========================================================================= */
 static void adc_install_instance(void)
 {
@@ -154,70 +151,58 @@ static void adc_install_instance(void)
         .bitwidth = ADC_BITWIDTH_12,
         .atten = ADC_ATTEN_DB_12,
     };
-    ESP_ERROR_CHECK(adc_oneshot_config_channel(adc_handle, GPIO_ADC_MQ9, &config));
+    ESP_ERROR_CHECK(adc_oneshot_config_channel(adc_handle, GPIO_ADC_MQ, &config));
 }
 
-static float calculate_CO(int raw_data)
+static float TinhNongDoKhi(int raw_data)
 {
     if (raw_data <= 0) return 0.0f;
     if (raw_data >= 4090) return 2000.0f;
 
     float v_data = (raw_data / ADC_LEVEL) * V_REF;
-    float Rs = 10.0f * ((V_REF / v_data) - 1.0f);        // Mạch chia áp trên module
-    float ty_le_Rs_Ro = Rs / MQ9_RO;
-    return 599.65f * powf(ty_le_Rs_Ro, -2.244f);         // Đồ thị log trong datasheet MQ-9
+    float Rs = 10.0f * ((V_REF / v_data) - 1.0f);        
+    float ty_le_Rs_Ro = Rs / MQ_RO;
+    return 599.65f * powf(ty_le_Rs_Ro, -2.244f);         
 }
 
 /* ========================================================================= *
- * TASK 1: ĐỌC CẢM BIẾN LỬA + GAS (digital, quét 100 ms)
+ * TASK 1: ĐỌC CẢM BIẾN LỬA (digital, quét 100 ms)
  * ========================================================================= */
-static void vTaskDocCamBien(void *pvParameters)
+static void vTaskDocCamBienLua(void *pvParameters)
 {
     gpio_set_direction(PIN_FLAME_SENSOR, GPIO_MODE_INPUT);
-    gpio_set_direction(PIN_MQ2_SENSOR, GPIO_MODE_INPUT);
 
-    int old_flame = -1, old_gas = -1;
-    ThongTinCamBien_t dulieuGui = {0};
+    int old_flame = -1;
+    ThongTinCamBien_t dulieuGui = { .eNguon = eCamBienLua };
 
     for (;;) {
-        int current_flame = gpio_get_level(PIN_FLAME_SENSOR);   // 0 = có sự cố
-        int current_gas   = gpio_get_level(PIN_MQ2_SENSOR);
-
+        int current_flame = gpio_get_level(PIN_FLAME_SENSOR);   // 0 = có lửa
         if (current_flame != old_flame) {
-            dulieuGui.eNguon = eCamBienLua;
             dulieuGui.bNguyHiem = (current_flame == 0);
             xQueueSend(xSensorQueue, &dulieuGui, 0);
             old_flame = current_flame;
-        }
-        if (current_gas != old_gas) {
-            dulieuGui.eNguon = eCamBienGas;
-            dulieuGui.bNguyHiem = (current_gas == 0);
-            xQueueSend(xSensorQueue, &dulieuGui, 0);
-            old_gas = current_gas;
         }
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
 
 /* ========================================================================= *
- * TASK 2: ĐỌC MQ-9 (ADC, mỗi 1 giây)
+ * TASK 2: ĐỌC CẢM BIẾN KHÍ ĐỘC (ADC, mỗi 1 giây)
  * ========================================================================= */
-static void vTaskDocMQ9(void *pvParameters)
+static void vTaskDocCamBienKhi(void *pvParameters)
 {
     adc_install_instance();
 
     int raw = 0;
     uint8_t co_nguy_hiem = 0;
-    ThongTinCamBien_t dulieuGui = { .eNguon = eCamBienCO };
+    ThongTinCamBien_t dulieuGui = { .eNguon = eCamBienMQ9 };
 
     for (;;) {
-        if (adc_oneshot_read(adc_handle, GPIO_ADC_MQ9, &raw) == ESP_OK) {
-            float ppm = calculate_CO(raw);
+        if (adc_oneshot_read(adc_handle, GPIO_ADC_MQ, &raw) == ESP_OK) {
+            float ppm = TinhNongDoKhi(raw);
 
-            if (ppm >= CO_NGUONG_BAO) co_nguy_hiem = 1;
-            else if (ppm <= CO_NGUONG_TAT) co_nguy_hiem = 0;
-
-            printf("ADC Tho: %d ---> Nong do CO: %.2f PPM\n", raw, ppm);
+            if (ppm >= KHI_NGUONG_BAO) co_nguy_hiem = 1;
+            else if (ppm <= KHI_NGUONG_TAT) co_nguy_hiem = 0;
 
             dulieuGui.fGiaTri = ppm;
             dulieuGui.bNguyHiem = co_nguy_hiem;
@@ -235,23 +220,27 @@ static void vTaskXuLyTrungTam(void *pvParameters)
     gpio_set_direction(PIN_BUZZER, GPIO_MODE_OUTPUT);
 
     ThongTinCamBien_t dulieuNhan;
-    uint8_t flag_lua = 0, flag_gas = 0, flag_co = 0;
-    float ppm_co = 0.0f;
+    uint8_t flag_lua = 0, flag_khi = 0;
+    float ppm_khi = 0.0f;
     uint8_t toggle_led_do = 0;
 
-    CapNhatManHinhOLED(0, 0, 0, 0.0f);
+    CapNhatManHinhOLED(0, 0, 0.0f);
 
     for (;;) {
         if (xQueueReceive(xSensorQueue, &dulieuNhan, pdMS_TO_TICKS(250)) == pdPASS) {
             switch (dulieuNhan.eNguon) {
-            case eCamBienLua: flag_lua = dulieuNhan.bNguyHiem; break;
-            case eCamBienGas: flag_gas = dulieuNhan.bNguyHiem; break;
-            case eCamBienCO:  flag_co = dulieuNhan.bNguyHiem; ppm_co = dulieuNhan.fGiaTri; break;
+                case eCamBienLua: 
+                    flag_lua = dulieuNhan.bNguyHiem; 
+                    break;
+                case eCamBienMQ9:  
+                    flag_khi = dulieuNhan.bNguyHiem; 
+                    ppm_khi = dulieuNhan.fGiaTri; 
+                    break;
             }
-            CapNhatManHinhOLED(flag_lua, flag_gas, flag_co, ppm_co);
+            CapNhatManHinhOLED(flag_lua, flag_khi, ppm_khi);
         }
 
-        if (flag_lua || flag_gas || flag_co) {
+        if (flag_lua || flag_khi) {
             DieuKhienBuzzer(1);
             toggle_led_do = !toggle_led_do;
             DieuKhienLedStrip_That(toggle_led_do ? 2 : 0);   // Nháy đỏ
@@ -271,7 +260,7 @@ void app_main(void)
 
     xSensorQueue = xQueueCreate(8, sizeof(ThongTinCamBien_t));
 
-    xTaskCreate(vTaskDocCamBien,    "Doc_Sensors",      2048, NULL, 1, NULL);
-    xTaskCreate(vTaskDocMQ9,        "Doc_MQ9",          3072, NULL, 1, NULL);
-    xTaskCreate(vTaskXuLyTrungTam,  "Xu_Ly_Trung_Tam",  4096, NULL, 2, NULL);
+    xTaskCreate(vTaskDocCamBienLua, "Doc_Lua",         2048, NULL, 1, NULL);
+    xTaskCreate(vTaskDocCamBienKhi, "Doc_Khi",         3072, NULL, 1, NULL);
+    xTaskCreate(vTaskXuLyTrungTam,  "Xu_Ly_Trung_Tam", 4096, NULL, 2, NULL);
 }

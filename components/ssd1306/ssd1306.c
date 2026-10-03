@@ -234,3 +234,7 @@ void ssd1306_printf(ssd1306_handle_t h, int x, int y, int scale, ssd1306_color_t
 
 int ssd1306_get_width(ssd1306_handle_t h)  { return h->width; }
 int ssd1306_get_height(ssd1306_handle_t h) { return h->height; }
+
+
+// LUA DO 
+// GAS TIM 
