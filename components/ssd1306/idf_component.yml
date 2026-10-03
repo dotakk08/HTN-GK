@@ -1,0 +1,4 @@
+version: "1.0.0"
+description: "SSD1306 OLED driver (I2C) using the new i2c_master driver"
+dependencies:
+  idf: ">=5.3"
