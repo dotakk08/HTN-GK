@@ -1,9 +1,0 @@
-Command: C:\Users\Admin\.espressif\python_env\idf6.0_py3.11_env\Scripts\python.exe D:\ESP_IDF\tools/idf_monitor.py -p COM8 -b 115200 --toolchain-prefix riscv32-esp-elf- --target esp32c3 --revision 3 --decode-panic backtrace D:\HTN\GK\GK\build\GK.elf D:\HTN\GK\GK\build\bootloader\bootloader.elf --force-color -m 'C:\Users\Admin\.espressif\python_env\idf6.0_py3.11_env\Scripts\python.exe' 'D:\ESP_IDF\tools\idf.py'
-[0;33m--- Warning: GDB cannot open serial ports accessed as COMx[0m
-[0;33m--- Using \\.\COM8 instead...[0m
-[0;33m--- esp-idf-monitor 1.9.0 on \\.\COM8 115200[0m
-[0;33m--- Quit: Ctrl+] | Menu: Ctrl+T | Help: Ctrl+T followed by Ctrl+H[0m
-[0m--- 0x403cbf10: [0;33mesp_bootloader_get_description[0m[0m at [0;32mD:/ESP_IDF/components/esp_bootloader_format/esp_bootloader_desc.c[0m[0m:[1;31m40[0m
-[0m--- 0x403ce710: [0;33mis_xmc_chip_strict[0m[0m at [0;32mD:/ESP_IDF/components/bootloader_support/bootloader_flash/src/bootloader_flash.c[0m[0m:[1;31m925[0m
-[0m--- 0x403cbf1a: [0;33mcall_start_cpu0[0m[0m at [0;32mD:/ESP_IDF/components/bootloader/subproject/main/bootloader_start.c[0m[0m:[1;31m27[0m
-[0m
