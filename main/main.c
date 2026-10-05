@@ -224,9 +224,15 @@ static void vTaskXuLyTrungTam(void *pvParameters)
     float ppm_khi = 0.0f;
     uint8_t toggle_led_do = 0;
 
+    int thoi_gian_giu_canh_bao = 0; 
+    
+    // [THÊM MỚI] Hai biến này dùng để "nhớ" cảm biến nào đã kích hoạt báo động
+    uint8_t nho_lua = 0, nho_khi = 0; 
+
     CapNhatManHinhOLED(0, 0, 0.0f);
 
     for (;;) {
+        // Đọc dữ liệu từ Queue
         if (xQueueReceive(xSensorQueue, &dulieuNhan, pdMS_TO_TICKS(250)) == pdPASS) {
             switch (dulieuNhan.eNguon) {
                 case eCamBienLua: 
@@ -237,10 +243,33 @@ static void vTaskXuLyTrungTam(void *pvParameters)
                     ppm_khi = dulieuNhan.fGiaTri; 
                     break;
             }
-            CapNhatManHinhOLED(flag_lua, flag_khi, ppm_khi);
         }
 
+        // 1. Nếu CÓ nguy hiểm thật từ cảm biến
         if (flag_lua || flag_khi) {
+            thoi_gian_giu_canh_bao = 12; // Nạp lại 3 giây
+            
+            // Cập nhật bộ nhớ để OLED biết chính xác cái gì đang cháy
+            if (flag_lua) nho_lua = 1;
+            if (flag_khi) nho_khi = 1;
+        } 
+        // 2. Nếu đã tắt nhưng vẫn trong 3s chờ
+        else if (thoi_gian_giu_canh_bao > 0) {
+            thoi_gian_giu_canh_bao--;
+        }
+
+        // 3. Khôi phục an toàn toàn diện khi bộ đếm về 0
+        if (thoi_gian_giu_canh_bao == 0) {
+            nho_lua = 0;
+            nho_khi = 0;
+        }
+
+        // Truyền biến "nhớ" vào màn hình thay vì biến thực tế, 
+        // giúp OLED giữ đúng dòng chữ CẢNH BÁO LỬA hoặc CẢNH BÁO GAS trong suốt 3 giây đó.
+        CapNhatManHinhOLED(nho_lua, nho_khi, ppm_khi);
+
+        // Điều khiển phần cứng: Cứ bộ đếm còn > 0 là còn kêu và chớp
+        if (thoi_gian_giu_canh_bao > 0) {
             DieuKhienBuzzer(1);
             toggle_led_do = !toggle_led_do;
             DieuKhienLedStrip_That(toggle_led_do ? 2 : 0);   // Nháy đỏ
@@ -250,7 +279,6 @@ static void vTaskXuLyTrungTam(void *pvParameters)
         }
     }
 }
-
 void app_main(void)
 {
     printf("He thong canh bao bat dau hoat dong...\n");
