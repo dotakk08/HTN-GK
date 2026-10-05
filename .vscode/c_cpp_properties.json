@@ -3,7 +3,7 @@
     {
       "name": "ESP-IDF",
       "compilerPath": "",
-      "compileCommands": "e:\\HK9\\HeThongNhung\\FreeRtos_esp32\\HTN-GK\\build\\compile_commands.json",
+      "compileCommands": "d:\\He_thong_nhung\\HTN-GK\\build\\compile_commands.json",
       "intelliSenseMode": "gcc-x86",
       "includePath": [
         "${workspaceFolder}/**"

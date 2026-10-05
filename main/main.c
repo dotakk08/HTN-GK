@@ -178,9 +178,13 @@ static void vTaskDocCamBienLua(void *pvParameters)
     for (;;) {
         bool current_flame = gpio_get_level(PIN_FLAME_SENSOR);   // 0 = có lửa
         if (current_flame != old_flame) {
-            dulieuGui.bNguyHiem = (current_flame == 0);
-            xQueueSend(xSensorQueue, &dulieuGui, 0);
-            old_flame = current_flame;
+            dulieuGui.eNguon = eCamBienLua;
+            dulieuGui.bNguyHiem = (current_flame == 0); // 0 = có sự cố
+            // [SỬA Ở ĐÂY]: Kiểm tra xem đẩy vào Queue có thành công (pdPASS) không
+            // Nếu Queue đầy bị thất bại, vòng lặp sau nó sẽ tự động gửi lại.
+            if (xQueueSend(xSensorQueue, &dulieuGui, 0) == pdPASS) {
+                old_flame = current_flame; // Chỉ nhớ trạng thái mới khi đã báo cáo xong
+            }
         }
         vTaskDelay(pdMS_TO_TICKS(100));
     }
@@ -217,22 +221,23 @@ static void vTaskDocCamBienKhi(void *pvParameters)
  * ========================================================================= */
 static void vTaskXuLyTrungTam(void *pvParameters)
 {
+    gpio_set_direction(PIN_BUZZER, GPIO_MODE_OUTPUT);
 
     ThongTinCamBien_t dulieuNhan;
-    bool flag_lua = 0, flag_khi = 0;
+    uint8_t flag_lua = 0, flag_khi = 0;
     float ppm_khi = 0.0f;
-    bool toggle_led_do = 0;
+    uint8_t toggle_led_do = 0;
 
     int thoi_gian_giu_canh_bao = 0; 
-    
-    // [THÊM MỚI] Hai biến này dùng để "nhớ" cảm biến nào đã kích hoạt báo động
-    bool nho_lua = 0, nho_khi = 0; 
+    uint8_t nho_lua = 0, nho_khi = 0; 
 
     CapNhatManHinhOLED(0, 0, 0.0f);
 
     for (;;) {
-        // Đọc dữ liệu từ Queue
-        if (xQueueReceive(xSensorQueue, &dulieuNhan, pdMS_TO_TICKS(250)) == pdPASS) {
+        // 1. RÚT SẠCH DỮ LIỆU TRONG QUEUE (Không chờ - 0 ms)
+        // Dùng vòng lặp while để vét sạch các tín hiệu nhiễu/bập bùng của lửa
+        // Task chỉ lấy kết quả (0 hoặc 1) cuối cùng và mới nhất.
+        while (xQueueReceive(xSensorQueue, &dulieuNhan, 0) == pdPASS) {
             switch (dulieuNhan.eNguon) {
                 case eCamBienLua: 
                     flag_lua = dulieuNhan.bNguyHiem; 
@@ -244,30 +249,24 @@ static void vTaskXuLyTrungTam(void *pvParameters)
             }
         }
 
-        // 1. Nếu CÓ nguy hiểm thật từ cảm biến
+        // 2. LOGIC LƯU TRỮ VÀ ĐẾM NGƯỢC 3 GIÂY (Giữ nguyên)
         if (flag_lua || flag_khi) {
             thoi_gian_giu_canh_bao = 12; // Nạp lại 3 giây
-            
-            // Cập nhật bộ nhớ để OLED biết chính xác cái gì đang cháy
             if (flag_lua) nho_lua = 1;
             if (flag_khi) nho_khi = 1;
         } 
-        // 2. Nếu đã tắt nhưng vẫn trong 3s chờ
         else if (thoi_gian_giu_canh_bao > 0) {
             thoi_gian_giu_canh_bao--;
         }
 
-        // 3. Khôi phục an toàn toàn diện khi bộ đếm về 0
         if (thoi_gian_giu_canh_bao == 0) {
             nho_lua = 0;
             nho_khi = 0;
         }
 
-        // Truyền biến "nhớ" vào màn hình thay vì biến thực tế, 
-        // giúp OLED giữ đúng dòng chữ CẢNH BÁO LỬA hoặc CẢNH BÁO GAS trong suốt 3 giây đó.
+        // 3. ĐIỀU KHIỂN OLED, CÒI, ĐÈN (Giữ nguyên)
         CapNhatManHinhOLED(nho_lua, nho_khi, ppm_khi);
 
-        // Điều khiển phần cứng: Cứ bộ đếm còn > 0 là còn kêu và chớp
         if (thoi_gian_giu_canh_bao > 0) {
             DieuKhienBuzzer(1);
             toggle_led_do = !toggle_led_do;
@@ -276,6 +275,10 @@ static void vTaskXuLyTrungTam(void *pvParameters)
             DieuKhienBuzzer(0);
             DieuKhienLedStrip_That(1);                       // Xanh lá
         }
+
+        // 4. BỘ ĐỊNH THỜI CỨNG KHÚC CUỐI (Quan trọng nhất)
+        // Ép Task luôn ngủ 250ms cho dù cảm biến có nhảy 0-1 điên cuồng đến đâu
+        vTaskDelay(pdMS_TO_TICKS(250));
     }
 }
 void app_main(void)
@@ -286,12 +289,12 @@ void app_main(void)
     KhoiTaoOLED();
 
 
-    xSensorQueue = xQueueCreate(2, sizeof(ThongTinCamBien_t));
+    xSensorQueue = xQueueCreate(1, sizeof(ThongTinCamBien_t));
     gpio_set_direction(PIN_FLAME_SENSOR, GPIO_MODE_INPUT);
     gpio_set_direction(PIN_BUZZER, GPIO_MODE_OUTPUT);
 
 
-    xTaskCreate(vTaskDocCamBienLua, "Doc_Lua",         2048, NULL, 1, NULL);
-    xTaskCreate(vTaskDocCamBienKhi, "Doc_Khi",         3072, NULL, 1, NULL);
-    xTaskCreate(vTaskXuLyTrungTam,  "Xu_Ly_Trung_Tam", 4096, NULL, 2, NULL);
+    xTaskCreate(vTaskDocCamBienLua, "Doc_Lua",         2048, NULL, 2, NULL);
+    xTaskCreate(vTaskDocCamBienKhi, "Doc_Khi",         3072, NULL, 2, NULL);
+    xTaskCreate(vTaskXuLyTrungTam,  "Xu_Ly_Trung_Tam", 4096, NULL, 1, NULL);
 }
