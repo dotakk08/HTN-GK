@@ -1,14 +1,15 @@
-#include <stdio.h>
+// #include <stdio.h>
 #include <math.h>
 #include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "freertos/queue.h"
+// #include "freertos/task.h"
+// #include "freertos/queue.h"
 #include "esp_log.h"
 #include "driver/gpio.h"
-#include "driver/i2c_master.h"
+// #include "driver/i2c_master.h"
 #include "esp_adc/adc_oneshot.h"
 #include "led_strip.h"
 #include "ssd1306.h"
+// #include <stdbool.h>
 
 static const char *TAG = "HE_THONG_BAO_CHAY";
 
@@ -16,7 +17,7 @@ static const char *TAG = "HE_THONG_BAO_CHAY";
 #define PIN_FLAME_SENSOR GPIO_NUM_2
 #define PIN_BUZZER       GPIO_NUM_3  
 #define PIN_LED_STRIP    GPIO_NUM_5
-#define SO_BONG_LED      8
+#define SO_BONG_LED      8  // Số lượng LED có thể điều khiển được trên đèn (VD 8/8 )
   
 /* OLED SSD1306 (I2C) */
 #define PIN_OLED_SDA     GPIO_NUM_6
@@ -39,7 +40,7 @@ typedef enum {
 
 typedef struct {
     NguonCamBien_t eNguon;
-    uint8_t bNguyHiem;   // 1 = Nguy hiểm, 0 = Bình thường
+    bool bNguyHiem;   // 1 = Nguy hiểm, 0 = Bình thường
     float   fGiaTri;     // Nồng độ PPM
 } ThongTinCamBien_t;
 
@@ -52,7 +53,7 @@ static ssd1306_handle_t oled = NULL;
 /* ========================================================================= *
  * BUZZER
  * ========================================================================= */
-static void DieuKhienBuzzer(uint8_t is_on)
+static void DieuKhienBuzzer(bool is_on)
 {
     gpio_set_level(PIN_BUZZER, is_on);
 }
@@ -81,10 +82,10 @@ static void KhoiTaoOLED(void)
     }
 }
 
-static void CapNhatManHinhOLED(uint8_t co_lua, uint8_t co_khi, float ppm)
+static void CapNhatManHinhOLED(bool co_lua, bool co_khi, float ppm)
 {
     static int last_alarm = -1;
-    uint8_t alarm = co_lua || co_khi;
+    bool alarm = co_lua || co_khi;
 
     printf("[OLED] %s | Lua: %d | Khi Doc: %d (%.1f ppm)\n",
            alarm ? "NGUY HIEM" : "AN TOAN", co_lua, co_khi, ppm);
@@ -168,15 +169,14 @@ static float TinhNongDoKhi(int raw_data)
 /* ========================================================================= *
  * TASK 1: ĐỌC CẢM BIẾN LỬA (digital, quét 100 ms)
  * ========================================================================= */
-static void vTaskDocCamBienLua(void *pvParameters)
-{
-    gpio_set_direction(PIN_FLAME_SENSOR, GPIO_MODE_INPUT);
+static void vTaskDocCamBienLua(void *pvParameters) 
+{   
 
-    int old_flame = -1;
+    bool old_flame = 1;
     ThongTinCamBien_t dulieuGui = { .eNguon = eCamBienLua };
 
     for (;;) {
-        int current_flame = gpio_get_level(PIN_FLAME_SENSOR);   // 0 = có lửa
+        bool current_flame = gpio_get_level(PIN_FLAME_SENSOR);   // 0 = có lửa
         if (current_flame != old_flame) {
             dulieuGui.bNguyHiem = (current_flame == 0);
             xQueueSend(xSensorQueue, &dulieuGui, 0);
@@ -184,7 +184,7 @@ static void vTaskDocCamBienLua(void *pvParameters)
         }
         vTaskDelay(pdMS_TO_TICKS(100));
     }
-}
+} // Đọc cảm biến lửa và gửi vào Queue 
 
 /* ========================================================================= *
  * TASK 2: ĐỌC CẢM BIẾN KHÍ ĐỘC (ADC, mỗi 1 giây)
@@ -194,7 +194,7 @@ static void vTaskDocCamBienKhi(void *pvParameters)
     adc_install_instance();
 
     int raw = 0;
-    uint8_t co_nguy_hiem = 0;
+    bool co_nguy_hiem = 0;
     ThongTinCamBien_t dulieuGui = { .eNguon = eCamBienMQ9 };
 
     for (;;) {
@@ -217,17 +217,16 @@ static void vTaskDocCamBienKhi(void *pvParameters)
  * ========================================================================= */
 static void vTaskXuLyTrungTam(void *pvParameters)
 {
-    gpio_set_direction(PIN_BUZZER, GPIO_MODE_OUTPUT);
 
     ThongTinCamBien_t dulieuNhan;
-    uint8_t flag_lua = 0, flag_khi = 0;
+    bool flag_lua = 0, flag_khi = 0;
     float ppm_khi = 0.0f;
-    uint8_t toggle_led_do = 0;
+    bool toggle_led_do = 0;
 
     int thoi_gian_giu_canh_bao = 0; 
     
     // [THÊM MỚI] Hai biến này dùng để "nhớ" cảm biến nào đã kích hoạt báo động
-    uint8_t nho_lua = 0, nho_khi = 0; 
+    bool nho_lua = 0, nho_khi = 0; 
 
     CapNhatManHinhOLED(0, 0, 0.0f);
 
@@ -286,7 +285,11 @@ void app_main(void)
     KhaiBaoLedStrip();
     KhoiTaoOLED();
 
-    xSensorQueue = xQueueCreate(8, sizeof(ThongTinCamBien_t));
+
+    xSensorQueue = xQueueCreate(2, sizeof(ThongTinCamBien_t));
+    gpio_set_direction(PIN_FLAME_SENSOR, GPIO_MODE_INPUT);
+    gpio_set_direction(PIN_BUZZER, GPIO_MODE_OUTPUT);
+
 
     xTaskCreate(vTaskDocCamBienLua, "Doc_Lua",         2048, NULL, 1, NULL);
     xTaskCreate(vTaskDocCamBienKhi, "Doc_Khi",         3072, NULL, 1, NULL);
