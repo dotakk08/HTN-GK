@@ -178,12 +178,14 @@ static void vTaskDocCamBienLua(void *pvParameters)
     for (;;) {
         bool current_flame = gpio_get_level(PIN_FLAME_SENSOR);   // 0 = có lửa
         if (current_flame != old_flame) {
-            dulieuGui.eNguon = eCamBienLua;
             dulieuGui.bNguyHiem = (current_flame == 0); // 0 = có sự cố
-            // [SỬA Ở ĐÂY]: Kiểm tra xem đẩy vào Queue có thành công (pdPASS) không
-            // Nếu Queue đầy bị thất bại, vòng lặp sau nó sẽ tự động gửi lại.
+    
             if (xQueueSend(xSensorQueue, &dulieuGui, 0) == pdPASS) {
                 old_flame = current_flame; // Chỉ nhớ trạng thái mới khi đã báo cáo xong
+                ESP_LOGI(TAG, "FIRE: SENT");
+            }
+            else {
+                ESP_LOGE(TAG,"FIRE: NOT SENT");
             }
         }
         vTaskDelay(pdMS_TO_TICKS(100));
@@ -210,7 +212,12 @@ static void vTaskDocCamBienKhi(void *pvParameters)
 
             dulieuGui.fGiaTri = ppm;
             dulieuGui.bNguyHiem = co_nguy_hiem;
-            xQueueSend(xSensorQueue, &dulieuGui, 0);
+            if(xQueueSend(xSensorQueue, &dulieuGui, 0)==pdPASS){
+                ESP_LOGI(TAG,"MQ9: OK");
+            }
+            else {
+                ESP_LOGE(TAG,"MQ9: NOT SENT");
+            }
         }
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
@@ -232,6 +239,7 @@ static void vTaskXuLyTrungTam(void *pvParameters)
     uint8_t nho_lua = 0, nho_khi = 0; 
 
     CapNhatManHinhOLED(0, 0, 0.0f);
+    TickType_t xLastWakeTime = xTaskGetTickCount();
 
     for (;;) {
         // 1. RÚT SẠCH DỮ LIỆU TRONG QUEUE (Không chờ - 0 ms)
@@ -278,7 +286,7 @@ static void vTaskXuLyTrungTam(void *pvParameters)
 
         // 4. BỘ ĐỊNH THỜI CỨNG KHÚC CUỐI (Quan trọng nhất)
         // Ép Task luôn ngủ 250ms cho dù cảm biến có nhảy 0-1 điên cuồng đến đâu
-        vTaskDelay(pdMS_TO_TICKS(250));
+        vTaskDelayUntil(&xLastWakeTime,pdMS_TO_TICKS(250));
     }
 }
 void app_main(void)
@@ -289,12 +297,12 @@ void app_main(void)
     KhoiTaoOLED();
 
 
-    xSensorQueue = xQueueCreate(1, sizeof(ThongTinCamBien_t));
+    xSensorQueue = xQueueCreate(4, sizeof(ThongTinCamBien_t));
     gpio_set_direction(PIN_FLAME_SENSOR, GPIO_MODE_INPUT);
     gpio_set_direction(PIN_BUZZER, GPIO_MODE_OUTPUT);
 
 
-    xTaskCreate(vTaskDocCamBienLua, "Doc_Lua",         2048, NULL, 2, NULL);
-    xTaskCreate(vTaskDocCamBienKhi, "Doc_Khi",         3072, NULL, 2, NULL);
-    xTaskCreate(vTaskXuLyTrungTam,  "Xu_Ly_Trung_Tam", 4096, NULL, 1, NULL);
+    xTaskCreate(vTaskDocCamBienLua, "Doc_Lua",         1000, NULL, 3, NULL);
+    xTaskCreate(vTaskDocCamBienKhi, "Doc_Khi",         1000, NULL, 1, NULL);
+    xTaskCreate(vTaskXuLyTrungTam,  "Xu_Ly_Trung_Tam", 1000, NULL, 2, NULL);
 }
